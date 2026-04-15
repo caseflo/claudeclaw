@@ -1,0 +1,10 @@
+node_modules/
+dist/
+store/
+.env
+*.pid
+workspace/
+*.ogg
+*.oga
+*.wav
+*.mp3

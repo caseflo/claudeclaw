@@ -1,0 +1,5 @@
+id: template
+name: Template Agent
+description: "Template for creating new agents"
+model: claude-sonnet-4-6
+mcp_servers: []

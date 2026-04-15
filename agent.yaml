@@ -1,0 +1,25 @@
+agents:
+  - id: main
+    name: Main
+    description: General-purpose assistant. Handles anything that doesn't clearly belong to a specialist.
+    model: claude-sonnet-4-6
+
+  - id: comms
+    name: Comms
+    description: Handles email, Slack, LinkedIn, and all communication channels.
+    model: claude-sonnet-4-6
+
+  - id: content
+    name: Content
+    description: Writes, edits, and publishes. Blog posts, social media, documentation, video scripts.
+    model: claude-sonnet-4-6
+
+  - id: ops
+    name: Ops
+    description: System administration, deployments, infrastructure, file management, backups.
+    model: claude-sonnet-4-6
+
+  - id: research
+    name: Research
+    description: Deep research, competitive analysis, market intelligence, technical investigation.
+    model: claude-sonnet-4-6
