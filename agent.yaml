@@ -1,8 +1,17 @@
 agents:
-  - id: main
-    name: Main
-    description: General-purpose assistant. Handles anything that doesn't clearly belong to a specialist.
+  - id: ramayne
+    name: Ramayne
+    description: Co-founder, commercial lead. Income generation, CaseFlo, builder.
     model: claude-sonnet-4-6
+    type: master
+    working_dir: agents/ramayne
+
+  - id: cheyenne
+    name: Cheyenne
+    description: Co-founder, domain expert. Former supervising social worker, IFA workflows.
+    model: claude-sonnet-4-6
+    type: master
+    working_dir: agents/cheyenne
 
   - id: comms
     name: Comms
