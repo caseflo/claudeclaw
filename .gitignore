@@ -8,3 +8,4 @@ workspace/
 *.oga
 *.wav
 *.mp3
+.playwright-cli/
