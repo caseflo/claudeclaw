@@ -2,9 +2,11 @@
  * agent.ts — Anthropic API direct client (no CLI needed)
  */
 import Anthropic from '@anthropic-ai/sdk';
-import { getSession, setSession, logTokenUsage } from './db.js';
+import { getSession, setSession, logTokenUsage, getRecentMessages } from './db.js';
 import { AGENT_TIMEOUT_MS, DEFAULT_AGENT_MODEL, ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL } from './config.js';
 import { logHiveMind } from './db.js';
+import { resolveAgentClaudeMd } from './agent-config.js';
+import { readFileSync } from 'fs';
 
 const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY(), baseURL: ANTHROPIC_BASE_URL() });
 
@@ -14,6 +16,22 @@ export interface AgentRunResult {
   inputTokens: number;
   outputTokens: number;
   model: string;
+}
+
+const AGENT_PROMPT_CACHE = new Map<string, string>();
+const REPLAY_MESSAGE_COUNT = 10;
+
+function getAgentSystemPrompt(agentId: string): string | undefined {
+  if (AGENT_PROMPT_CACHE.has(agentId)) return AGENT_PROMPT_CACHE.get(agentId);
+  const mdPath = resolveAgentClaudeMd(agentId);
+  if (!mdPath) return undefined;
+  try {
+    const content = readFileSync(mdPath, 'utf8');
+    AGENT_PROMPT_CACHE.set(agentId, content);
+    return content;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function runAgent(
@@ -37,12 +55,22 @@ export async function runAgent(
   let newSessionId = existingSession ?? '';
 
   const run = (async () => {
+    // Replay last N conversation turns for continuity
+    const history = getRecentMessages(userId, chatId, agentId, REPLAY_MESSAGE_COUNT);
+
     const messages: Anthropic.MessageParam[] = [
-      { role: 'user', content: prompt },
+      ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      { role: 'user' as const, content: prompt },
     ];
 
-    const systemInstruction = systemPrompt
-      ? [{ type: 'text' as const, text: systemPrompt }]
+    // Build system prompt from explicit override + agent CLAUDE.md
+    const agentPrompt = getAgentSystemPrompt(agentId);
+    const parts: string[] = [];
+    if (systemPrompt) parts.push(systemPrompt);
+    if (agentPrompt) parts.push(agentPrompt);
+    const combinedSystem = parts.join('\n\n');
+    const systemInstruction = combinedSystem
+      ? [{ type: 'text' as const, text: combinedSystem }]
       : undefined;
 
     const response = await client.messages.create({
