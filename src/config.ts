@@ -24,6 +24,7 @@ export const ALLOWED_CHAT_ID = () => getEnv('ALLOWED_CHAT_ID');
 // Google AI (Memory v2, War Room, video analysis)
 export const GOOGLE_API_KEY = () => getEnvOptional('GOOGLE_API_KEY');
 export const ANTHROPIC_API_KEY = () => getEnvOptional('ANTHROPIC_API_KEY');
+export const ANTHROPIC_BASE_URL = () => getEnvOptional('ANTHROPIC_BASE_URL', 'https://api.minimax.io/anthropic');
 
 // Voice STT
 export const GROQ_API_KEY = () => getEnvOptional('GROQ_API_KEY');

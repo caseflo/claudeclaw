@@ -3,10 +3,10 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import { getSession, setSession, logTokenUsage } from './db.js';
-import { AGENT_TIMEOUT_MS, DEFAULT_AGENT_MODEL, ANTHROPIC_API_KEY } from './config.js';
+import { AGENT_TIMEOUT_MS, DEFAULT_AGENT_MODEL, ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL } from './config.js';
 import { logHiveMind } from './db.js';
 
-const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY(), baseURL: "https://api.minimax.io/anthropic" });
+const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY(), baseURL: ANTHROPIC_BASE_URL() });
 
 export interface AgentRunResult {
   text: string;
