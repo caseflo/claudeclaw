@@ -21,6 +21,7 @@ export async function runAgent(
   chatId: string,
   agentId: string,
   systemPrompt?: string,
+  signal?: AbortSignal,
 ): Promise<AgentRunResult> {
   const existingSession = getSession(chatId, agentId);
   const model = DEFAULT_AGENT_MODEL;
@@ -49,6 +50,7 @@ export async function runAgent(
       system: systemInstruction,
       messages,
       stream: true,
+      ...(signal ? { signal } : {}),
     });
 
     for await (const chunk of response) {
@@ -96,7 +98,7 @@ export async function runAgentWithRetry(
   let lastError: unknown;
   for (let i = 0; i <= maxRetries; i++) {
     try {
-      return await runAgent(prompt, chatId, agentId, systemPrompt);
+      return await runAgent(prompt, chatId, agentId, systemPrompt, signal);
     } catch (err) {
       lastError = err;
       if (signal?.aborted) throw err;
