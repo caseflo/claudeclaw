@@ -3,7 +3,7 @@
  * Starts: Telegram bot(s), Dashboard, Scheduler, Consolidation loop, PID lock
  */
 import { writeFileSync, readFileSync, existsSync } from 'fs';
-import { createBot } from './bot.js';
+import { createBotsForUsers, UserBot } from './bot.js';
 import { startDashboard } from './dashboard.js';
 import { startScheduler } from './scheduler.js';
 import { startConsolidationLoop } from './memory-consolidate.js';
@@ -77,22 +77,35 @@ async function main(): Promise<void> {
     startDashboard();
   }
 
-  // Start memory consolidation loop for ramayne (placeholder — P1-24 will stagger all agents)
-  if (FEATURES.voice) {
-    startConsolidationLoop('ramayne', 'ramayne');
-  }
-
   // Daily salience decay (run at startup, then every 24h)
   runSalienceDecay();
   setInterval(() => runSalienceDecay(), 24 * 60 * 60 * 1000);
 
-  // Create main Telegram bot
-  const bot = createBot();
+  // Create and start all user bots
+  const userBots = createBotsForUsers();
 
-  // Start scheduler
+  if (userBots.length === 0) {
+    log.error('No bots configured. Set RAMAYNE_TELEGRAM_BOT_TOKEN / RAMAYNE_CHAT_ID in .env');
+    process.exit(1);
+  }
+
+  // Build chatId → send function map for scheduler
+  const chatIdToSender = new Map<string, (text: string) => Promise<void>>();
+  for (const ub of userBots) {
+    chatIdToSender.set(ub.chatId, async (text: string) => {
+      await ub.bot.api.sendMessage(ub.chatId, text, { parse_mode: 'HTML' }).catch(() => {});
+    });
+  }
+
+  // Start scheduler with routing callback
   if (FEATURES.scheduler) {
     startScheduler(async (chatId, text) => {
-      await bot.api.sendMessage(chatId, text, { parse_mode: 'HTML' }).catch(() => {});
+      const sender = chatIdToSender.get(chatId);
+      if (sender) {
+        await sender(text);
+      } else {
+        log.warn({ chatId }, '[scheduler] Unknown chat_id — no bot configured');
+      }
     });
   }
 
@@ -102,7 +115,9 @@ async function main(): Promise<void> {
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     log.info({ signal }, 'Shutting down gracefully');
-    try { await bot.stop(); } catch {}
+    for (const ub of userBots) {
+      try { await ub.bot.stop(); } catch {}
+    }
     try { stopScheduler(); } catch {}
     try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); db.close(); } catch {}
     process.exit(0);
@@ -110,11 +125,13 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-  // Start the bot (long polling)
-  log.info('Starting Telegram bot...');
-  await bot.start({
-    onStart: info => log.info({ username: info.username }, 'Bot started'),
-  });
+  // Start all bots (long polling)
+  for (const ub of userBots) {
+    log.info({ userId: ub.userId }, 'Starting Telegram bot...');
+    await ub.bot.start({
+      onStart: info => log.info({ username: info.username, userId: ub.userId }, 'Bot started'),
+    });
+  }
 }
 
 // ─── Global exception handlers ─────────────────────────────────────────────────
