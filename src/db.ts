@@ -21,19 +21,84 @@ db.exec(`PRAGMA journal_mode = WAL`);
 db.exec(`PRAGMA foreign_keys = ON`);
 db.exec(`PRAGMA synchronous = NORMAL`);
 
+// Migration v5: add users table and user_id columns
+// Backwards-safe: existing rows get user_id = 'ramayne'
+{
+  const hasUsers = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").get();
+  if (!hasUsers) {
+    db.exec(`
+      CREATE TABLE users (
+        user_id           TEXT PRIMARY KEY,
+        display_name      TEXT NOT NULL,
+        timezone          TEXT NOT NULL DEFAULT 'Europe/London',
+        telegram_chat_id  TEXT,
+        telegram_bot_token_env TEXT,
+        master_agent_id   TEXT NOT NULL,
+        created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    // Seed default users
+    db.prepare('INSERT INTO users (user_id, display_name, master_agent_id) VALUES (?, ?, ?)').run('ramayne', 'Ramayne', 'ramayne');
+    db.prepare('INSERT INTO users (user_id, display_name, master_agent_id) VALUES (?, ?, ?)').run('cheyenne', 'Cheyenne', 'cheyenne');
+  }
+
+  // Backfill user_id into sessions if not already set
+  const hasSessionUserId = db.prepare("PRAGMA table_info(sessions)").all().some((c: any) => c.name === 'user_id');
+  if (!hasSessionUserId) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'ramayne'`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)`);
+  }
+
+  // Backfill user_id into messages if not already set
+  const hasMsgUserId = db.prepare("PRAGMA table_info(messages)").all().some((c: any) => c.name === 'user_id');
+  if (!hasMsgUserId) {
+    db.exec(`ALTER TABLE messages ADD COLUMN user_id TEXT NOT NULL DEFAULT 'ramayne'`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id)`);
+  }
+
+  // Backfill user_id into memories if not already set
+  const hasMemUserId = db.prepare("PRAGMA table_info(memories)").all().some((c: any) => c.name === 'user_id');
+  if (!hasMemUserId) {
+    db.exec(`ALTER TABLE memories ADD COLUMN user_id TEXT NOT NULL DEFAULT 'ramayne'`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_user_id ON memories(user_id)`);
+  }
+
+  // Backfill user_id into scheduled_tasks if not already set
+  const hasTaskUserId = db.prepare("PRAGMA table_info(scheduled_tasks)").all().some((c: any) => c.name === 'user_id');
+  if (!hasTaskUserId) {
+    db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN user_id TEXT NOT NULL DEFAULT 'ramayne'`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_user_id ON scheduled_tasks(user_id)`);
+  }
+
+  // Backfill user_id into audit_log if not already set
+  const hasAuditUserId = db.prepare("PRAGMA table_info(audit_log)").all().some((c: any) => c.name === 'user_id');
+  if (!hasAuditUserId) {
+    db.exec(`ALTER TABLE audit_log ADD COLUMN user_id TEXT NOT NULL DEFAULT 'ramayne'`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id)`);
+  }
+
+  // Backfill user_id into token_usage if not already set
+  const hasTokenUserId = db.prepare("PRAGMA table_info(token_usage)").all().some((c: any) => c.name === 'user_id');
+  if (!hasTokenUserId) {
+    db.exec(`ALTER TABLE token_usage ADD COLUMN user_id TEXT NOT NULL DEFAULT 'ramayne'`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_token_usage_user_id ON token_usage(user_id)`);
+  }
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS sessions (
   chat_id    TEXT NOT NULL,
+  user_id    TEXT NOT NULL DEFAULT 'ramayne',
   agent_id   TEXT NOT NULL,
   session_id TEXT NOT NULL,
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (chat_id, agent_id)
+  PRIMARY KEY (chat_id, agent_id, user_id)
 )`);
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS messages (
   id         TEXT PRIMARY KEY,
   chat_id    TEXT NOT NULL,
+  user_id    TEXT NOT NULL DEFAULT 'ramayne',
   agent_id   TEXT NOT NULL,
   role       TEXT NOT NULL,
   content    TEXT NOT NULL,
@@ -44,6 +109,7 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS memories (
   id            TEXT PRIMARY KEY,
   chat_id       TEXT,
+  user_id       TEXT NOT NULL DEFAULT 'ramayne',
   agent_id      TEXT NOT NULL,
   summary       TEXT NOT NULL,
   raw_text      TEXT,
@@ -110,6 +176,7 @@ CREATE TABLE IF NOT EXISTS hive_mind (
 db.exec(`
 CREATE TABLE IF NOT EXISTS scheduled_tasks (
   id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL DEFAULT 'ramayne',
   name        TEXT NOT NULL,
   prompt      TEXT NOT NULL,
   cron        TEXT NOT NULL,
@@ -127,6 +194,7 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
 db.exec(`
 CREATE TABLE IF NOT EXISTS audit_log (
   id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL DEFAULT 'ramayne',
   event_type TEXT NOT NULL,
   chat_id    TEXT,
   agent_id   TEXT,
@@ -152,6 +220,7 @@ CREATE TABLE IF NOT EXISTS agents (
 db.exec(`
 CREATE TABLE IF NOT EXISTS token_usage (
   id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL DEFAULT 'ramayne',
   agent_id     TEXT NOT NULL,
   chat_id      TEXT,
   input_tokens  INTEGER NOT NULL DEFAULT 0,
@@ -162,42 +231,43 @@ CREATE TABLE IF NOT EXISTS token_usage (
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
 
-export function getSession(chatId: string, agentId: string): string | null {
-  const row = db.prepare('SELECT session_id FROM sessions WHERE chat_id = ? AND agent_id = ?').get(chatId, agentId) as any;
+export function getSession(userId: string, chatId: string, agentId: string): string | null {
+  const row = db.prepare('SELECT session_id FROM sessions WHERE user_id = ? AND chat_id = ? AND agent_id = ?').get(userId, chatId, agentId) as any;
   return row?.session_id ?? null;
 }
 
-export function setSession(chatId: string, agentId: string, sessionId: string): void {
+export function setSession(userId: string, chatId: string, agentId: string, sessionId: string): void {
   db.prepare(`
-    INSERT INTO sessions (chat_id, agent_id, session_id, updated_at)
-    VALUES (?, ?, ?, datetime('now'))
-    ON CONFLICT(chat_id, agent_id) DO UPDATE SET session_id = excluded.session_id, updated_at = excluded.updated_at
-  `).run(chatId, agentId, sessionId);
+    INSERT INTO sessions (user_id, chat_id, agent_id, session_id, updated_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id, chat_id, agent_id) DO UPDATE SET session_id = excluded.session_id, updated_at = excluded.updated_at
+  `).run(userId, chatId, agentId, sessionId);
 }
 
-export function clearSession(chatId: string, agentId: string): void {
-  db.prepare('DELETE FROM sessions WHERE chat_id = ? AND agent_id = ?').run(chatId, agentId);
+export function clearSession(userId: string, chatId: string, agentId: string): void {
+  db.prepare('DELETE FROM sessions WHERE user_id = ? AND chat_id = ? AND agent_id = ?').run(userId, chatId, agentId);
 }
 
 // ─── Message history helpers ──────────────────────────────────────────────────
 
-export function saveMessage(chatId: string, agentId: string, role: string, content: string): void {
-  db.prepare('INSERT INTO messages (id, chat_id, agent_id, role, content) VALUES (?, ?, ?, ?, ?)').run(randomUUID(), chatId, agentId, role, content);
+export function saveMessage(userId: string, chatId: string, agentId: string, role: string, content: string): void {
+  db.prepare('INSERT INTO messages (id, user_id, chat_id, agent_id, role, content) VALUES (?, ?, ?, ?, ?, ?)').run(randomUUID(), userId, chatId, agentId, role, content);
 }
 
-export function getRecentMessages(chatId: string, agentId: string, limit = 20): Array<{ role: string; content: string }> {
+export function getRecentMessages(userId: string, chatId: string, agentId: string, limit = 20): Array<{ role: string; content: string }> {
   return (db.prepare(`
     SELECT role, content FROM messages
-    WHERE chat_id = ? AND agent_id = ?
+    WHERE user_id = ? AND chat_id = ? AND agent_id = ?
     ORDER BY created_at DESC
     LIMIT ?
-  `).all(chatId, agentId, limit) as any[]).reverse();
+  `).all(userId, chatId, agentId, limit) as any[]).reverse();
 }
 
 // ─── Memory helpers ───────────────────────────────────────────────────────────
 
 export interface Memory {
   id: string;
+  user_id: string;
   chat_id?: string;
   agent_id: string;
   summary: string;
@@ -228,10 +298,11 @@ function parseMemory(row: any): Memory {
 export function insertMemory(mem: Omit<Memory, 'id' | 'created_at' | 'last_accessed'>): string {
   const id = randomUUID();
   db.prepare(`
-    INSERT INTO memories (id, chat_id, agent_id, summary, raw_text, entities, topics, importance, salience, pinned, embedding, session_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO memories (id, user_id, chat_id, agent_id, summary, raw_text, entities, topics, importance, salience, pinned, embedding, session_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
+    mem.user_id,
     mem.chat_id ?? null,
     mem.agent_id,
     mem.summary,
@@ -247,16 +318,16 @@ export function insertMemory(mem: Omit<Memory, 'id' | 'created_at' | 'last_acces
   return id;
 }
 
-export function getMemoriesByAgent(agentId: string, limit = 200): Memory[] {
+export function getMemoriesByAgent(userId: string, agentId: string, limit = 200): Memory[] {
   return (db.prepare(`
-    SELECT * FROM memories WHERE agent_id = ? AND superseded_by IS NULL ORDER BY salience DESC, importance DESC LIMIT ?
-  `).all(agentId, limit) as any[]).map(parseMemory);
+    SELECT * FROM memories WHERE user_id = ? AND agent_id = ? AND superseded_by IS NULL ORDER BY salience DESC, importance DESC LIMIT ?
+  `).all(userId, agentId, limit) as any[]).map(parseMemory);
 }
 
-export function getUnconsolidatedMemories(agentId: string, limit = 20): Memory[] {
+export function getUnconsolidatedMemories(userId: string, agentId: string, limit = 20): Memory[] {
   return (db.prepare(`
-    SELECT * FROM memories WHERE agent_id = ? AND consolidated = 0 ORDER BY created_at ASC LIMIT ?
-  `).all(agentId, limit) as any[]).map(parseMemory);
+    SELECT * FROM memories WHERE user_id = ? AND agent_id = ? AND consolidated = 0 ORDER BY created_at ASC LIMIT ?
+  `).all(userId, agentId, limit) as any[]).map(parseMemory);
 }
 
 export function markMemoriesConsolidated(ids: string[]): void {
@@ -282,23 +353,23 @@ export function getLatestConsolidations(agentId: string, limit = 3): Array<{ ins
   }));
 }
 
-export function searchMemoriesFTS(query: string, limit = 5): Memory[] {
+export function searchMemoriesFTS(userId: string, query: string, limit = 5): Memory[] {
   try {
     return (db.prepare(`
       SELECT m.* FROM memories m
       JOIN memories_fts ON m.rowid = memories_fts.rowid
-      WHERE memories_fts MATCH ?
+      WHERE m.user_id = ? AND memories_fts MATCH ?
       ORDER BY rank LIMIT ?
-    `).all(query, limit) as any[]).map(parseMemory);
+    `).all(userId, query, limit) as any[]).map(parseMemory);
   } catch {
     return [];
   }
 }
 
-export function getAllEmbeddings(agentId: string): Array<{ id: string; embedding: string }> {
+export function getAllEmbeddings(userId: string, agentId: string): Array<{ id: string; embedding: string }> {
   return (db.prepare(`
-    SELECT id, embedding FROM memories WHERE agent_id = ? AND embedding IS NOT NULL AND superseded_by IS NULL
-  `).all(agentId) as any[]);
+    SELECT id, embedding FROM memories WHERE user_id = ? AND agent_id = ? AND embedding IS NOT NULL AND superseded_by IS NULL
+  `).all(userId, agentId) as any[]);
 }
 
 export function updateSalience(id: string, newValue: number): void {
@@ -321,21 +392,21 @@ export function setSupersededBy(oldId: string, newId: string): void {
   db.prepare('UPDATE memories SET superseded_by = ? WHERE id = ?').run(newId, oldId);
 }
 
-export function searchConversationHistory(keywords: string, agentId: string, dayWindow = 7, limit = 10): Memory[] {
+export function searchConversationHistory(userId: string, keywords: string, agentId: string, dayWindow = 7, limit = 10): Memory[] {
   const since = new Date(Date.now() - dayWindow * 24 * 60 * 60 * 1000).toISOString();
   return (db.prepare(`
     SELECT * FROM memories
-    WHERE agent_id = ? AND created_at >= ? AND (summary LIKE ? OR raw_text LIKE ?)
+    WHERE user_id = ? AND agent_id = ? AND created_at >= ? AND (summary LIKE ? OR raw_text LIKE ?)
     ORDER BY created_at DESC LIMIT ?
-  `).all(agentId, since, `%${keywords}%`, `%${keywords}%`, limit) as any[]).map(parseMemory);
+  `).all(userId, agentId, since, `%${keywords}%`, `%${keywords}%`, limit) as any[]).map(parseMemory);
 }
 
-export function getRecentHighImportanceMemories(agentId: string, limit = 5): Memory[] {
+export function getRecentHighImportanceMemories(userId: string, agentId: string, limit = 5): Memory[] {
   return (db.prepare(`
     SELECT * FROM memories
-    WHERE agent_id = ? AND importance >= 0.7 AND superseded_by IS NULL
+    WHERE user_id = ? AND agent_id = ? AND importance >= 0.7 AND superseded_by IS NULL
     ORDER BY created_at DESC LIMIT ?
-  `).all(agentId, limit) as any[]).map(parseMemory);
+  `).all(userId, agentId, limit) as any[]).map(parseMemory);
 }
 
 export function runSalienceDecay(): void {
@@ -367,6 +438,7 @@ export function getHiveMind(limit = 50): Array<{ agent_id: string; action_type: 
 
 export interface ScheduledTask {
   id: string;
+  user_id: string;
   name: string;
   prompt: string;
   cron: string;
@@ -384,9 +456,9 @@ export interface ScheduledTask {
 export function createTask(task: Omit<ScheduledTask, 'id' | 'run_count' | 'created_at'>): string {
   const id = randomUUID();
   db.prepare(`
-    INSERT INTO scheduled_tasks (id, name, prompt, cron, agent_id, chat_id, priority, status, next_run)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, task.name, task.prompt, task.cron, task.agent_id, task.chat_id, task.priority, task.status, task.next_run ?? null);
+    INSERT INTO scheduled_tasks (id, user_id, name, prompt, cron, agent_id, chat_id, priority, status, next_run)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, task.user_id, task.name, task.prompt, task.cron, task.agent_id, task.chat_id, task.priority, task.status, task.next_run ?? null);
   return id;
 }
 
@@ -420,8 +492,8 @@ export function deleteTask(id: string): void {
 
 // ─── Audit log helpers ────────────────────────────────────────────────────────
 
-export function logAudit(eventType: string, summary: string, chatId?: string, agentId?: string, metadata: Record<string, unknown> = {}): void {
-  db.prepare('INSERT INTO audit_log (id, event_type, chat_id, agent_id, summary, metadata) VALUES (?, ?, ?, ?, ?, ?)').run(randomUUID(), eventType, chatId ?? null, agentId ?? null, summary, JSON.stringify(metadata));
+export function logAudit(eventType: string, summary: string, userId?: string, chatId?: string, agentId?: string, metadata: Record<string, unknown> = {}): void {
+  db.prepare('INSERT INTO audit_log (id, user_id, event_type, chat_id, agent_id, summary, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)').run(randomUUID(), userId ?? 'ramayne', eventType, chatId ?? null, agentId ?? null, summary, JSON.stringify(metadata));
 }
 
 export function getAuditLog(limit = 100): Array<{ event_type: string; summary: string; created_at: string }> {
@@ -478,15 +550,43 @@ export function setAgentStatus(id: string, status: string): void {
 
 // ─── Token usage helpers ──────────────────────────────────────────────────────
 
-export function logTokenUsage(agentId: string, chatId: string, inputTokens: number, outputTokens: number, model: string): void {
-  db.prepare('INSERT INTO token_usage (id, agent_id, chat_id, input_tokens, output_tokens, model) VALUES (?, ?, ?, ?, ?, ?)').run(randomUUID(), agentId, chatId, inputTokens, outputTokens, model);
+export function logTokenUsage(userId: string, agentId: string, chatId: string, inputTokens: number, outputTokens: number, model: string): void {
+  db.prepare('INSERT INTO token_usage (id, user_id, agent_id, chat_id, input_tokens, output_tokens, model) VALUES (?, ?, ?, ?, ?, ?, ?)').run(randomUUID(), userId, agentId, chatId, inputTokens, outputTokens, model);
 }
 
-export function getTokenUsage(agentId?: string): Array<{ agent_id: string; input_tokens: number; output_tokens: number; created_at: string }> {
-  if (agentId) {
-    return db.prepare('SELECT agent_id, input_tokens, output_tokens, created_at FROM token_usage WHERE agent_id = ? ORDER BY created_at DESC LIMIT 500').all(agentId) as any[];
+export function getTokenUsage(userId?: string): Array<{ user_id: string; agent_id: string; input_tokens: number; output_tokens: number; created_at: string }> {
+  if (userId) {
+    return db.prepare('SELECT user_id, agent_id, input_tokens, output_tokens, created_at FROM token_usage WHERE user_id = ? ORDER BY created_at DESC LIMIT 500').all(userId) as any[];
   }
-  return db.prepare('SELECT agent_id, input_tokens, output_tokens, created_at FROM token_usage ORDER BY created_at DESC LIMIT 500').all() as any[];
+  return db.prepare('SELECT user_id, agent_id, input_tokens, output_tokens, created_at FROM token_usage ORDER BY created_at DESC LIMIT 500').all() as any[];
+}
+
+// ─── User helpers ─────────────────────────────────────────────────────────────
+
+export interface User {
+  user_id: string;
+  display_name: string;
+  timezone: string;
+  telegram_chat_id?: string;
+  telegram_bot_token_env?: string;
+  master_agent_id: string;
+  created_at: string;
+}
+
+export function getAllUsers(): User[] {
+  return db.prepare('SELECT * FROM users ORDER BY created_at ASC').all() as unknown as User[];
+}
+
+export function getUserByChatId(chatId: string): User | null {
+  const row = db.prepare('SELECT * FROM users WHERE telegram_chat_id = ?').get(chatId) as any;
+  return row ?? null;
+}
+
+// ─── Memory helpers (continued) ────────────────────────────────────────────────
+
+export function getMemoryById(id: string): Memory | null {
+  const row = db.prepare('SELECT * FROM memories WHERE id = ?').get(id) as any;
+  return row ? parseMemory(row) : null;
 }
 
 export { db };
