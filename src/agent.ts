@@ -19,11 +19,12 @@ export interface AgentRunResult {
 export async function runAgent(
   prompt: string,
   chatId: string,
+  userId: string,
   agentId: string,
   systemPrompt?: string,
   signal?: AbortSignal,
 ): Promise<AgentRunResult> {
-  const existingSession = getSession(chatId, agentId);
+  const existingSession = getSession(userId, chatId, agentId);
   const model = DEFAULT_AGENT_MODEL;
 
   const timeout = new Promise<never>((_, reject) =>
@@ -77,11 +78,11 @@ export async function runAgent(
   await Promise.race([run, timeout]);
 
   if (newSessionId) {
-    setSession(chatId, agentId, newSessionId);
+    setSession(userId, chatId, agentId, newSessionId);
   }
 
   if (inputTokens || outputTokens) {
-    logTokenUsage(agentId, chatId, inputTokens, outputTokens, model);
+    logTokenUsage(userId, agentId, chatId, inputTokens, outputTokens, model);
   }
 
   return { text: fullText, sessionId: newSessionId, inputTokens, outputTokens, model };
@@ -90,6 +91,7 @@ export async function runAgent(
 export async function runAgentWithRetry(
   prompt: string,
   chatId: string,
+  userId: string,
   agentId: string,
   systemPrompt?: string,
   signal?: AbortSignal,
@@ -98,7 +100,7 @@ export async function runAgentWithRetry(
   let lastError: unknown;
   for (let i = 0; i <= maxRetries; i++) {
     try {
-      return await runAgent(prompt, chatId, agentId, systemPrompt, signal);
+      return await runAgent(prompt, chatId, userId, agentId, systemPrompt, signal);
     } catch (err) {
       lastError = err;
       if (signal?.aborted) throw err;
@@ -112,10 +114,11 @@ export async function runAgentWithRetry(
 
 export async function runAgentAutonomous(
   prompt: string,
+  userId: string,
   agentId: string,
   chatId: string,
 ): Promise<AgentRunResult> {
-  const result = await runAgent(prompt, chatId, agentId);
+  const result = await runAgent(prompt, chatId, userId, agentId);
   logHiveMind(agentId, 'autonomous_task', result.text.slice(0, 200), { prompt: prompt.slice(0, 100) });
   return result;
 }

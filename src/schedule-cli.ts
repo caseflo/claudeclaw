@@ -3,7 +3,7 @@
  * Usage: tsx src/schedule-cli.ts <command> [args...]
  *
  * Commands:
- *   create <name> <prompt> <cron> <chat_id> [agent_id] [priority]
+ *   create <name> <prompt> <cron> <user_id> <chat_id> [agent_id] [priority]
  *   list
  *   delete <task_id>
  *   pause <task_id>
@@ -16,13 +16,13 @@ const [,, command, ...args] = process.argv;
 
 switch (command) {
   case 'create': {
-    const [name, prompt, cron, chatId, agentId = 'main', priorityStr = '3'] = args;
-    if (!name || !prompt || !cron || !chatId) {
-      console.error('Usage: create <name> <prompt> <cron> <chat_id> [agent_id] [priority]');
+    const [name, prompt, cron, userId, chatId, agentId = 'main', priorityStr = '3'] = args;
+    if (!name || !prompt || !cron || !userId || !chatId) {
+      console.error('Usage: create <name> <prompt> <cron> <user_id> <chat_id> [agent_id] [priority]');
       process.exit(1);
     }
     const nextRun = computeNextRun(cron);
-    const id = createTask({ name, prompt, cron, chat_id: chatId, agent_id: agentId, priority: parseInt(priorityStr), status: 'pending', next_run: nextRun ?? undefined });
+    const id = createTask({ name, prompt, cron, user_id: userId, chat_id: chatId, agent_id: agentId, priority: parseInt(priorityStr), status: 'pending', next_run: nextRun ?? undefined });
     console.log(`Task created: ${id}`);
     console.log(`Next run: ${nextRun ?? 'Invalid cron'}`);
     break;

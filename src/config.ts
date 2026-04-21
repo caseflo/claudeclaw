@@ -83,6 +83,12 @@ export const ALLOWED_CHAT_IDS = () => {
   return ids ? ids.split(',').map(s => s.trim()) : [getEnvOptional('ALLOWED_CHAT_ID')];
 };
 
+// Per-user Telegram bot tokens (referenced by users table)
+export const RAMAYNE_TELEGRAM_BOT_TOKEN = () => getEnvOptional('RAMAYNE_TELEGRAM_BOT_TOKEN');
+export const RAMAYNE_CHAT_ID = () => getEnvOptional('RAMAYNE_CHAT_ID');
+export const CHEYENNE_TELEGRAM_BOT_TOKEN = () => getEnvOptional('CHEYENNE_TELEGRAM_BOT_TOKEN');
+export const CHEYENNE_CHAT_ID = () => getEnvOptional('CHEYENNE_CHAT_ID');
+
 // Hive mind
 export const HIVE_MIND_ENABLED = getEnvOptional('HIVE_MIND_ENABLED', 'true') === 'true';
 

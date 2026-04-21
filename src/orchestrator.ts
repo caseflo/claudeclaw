@@ -31,7 +31,8 @@ export function isBroadcast(text: string): boolean {
 export async function routeMessage(
   text: string,
   chatId: string,
-  defaultAgentId = 'main',
+  userId: string,
+  defaultAgentId: string,
   signal?: AbortSignal,
 ): Promise<OrchestratorResult[]> {
   const config = loadAgentConfig();
@@ -43,7 +44,7 @@ export async function routeMessage(
     const results = await Promise.all(
       activeAgents.map(async a => ({
         agentId: a.id,
-        result: await runAgentWithRetry(prompt, chatId, a.id, undefined, signal),
+        result: await runAgentWithRetry(prompt, chatId, userId, a.id, undefined, signal),
         delegated: true,
       }))
     );
@@ -59,13 +60,13 @@ export async function routeMessage(
     if (!agentExists) {
       throw new Error(`Unknown agent: ${agentId}. Available: ${activeAgents.map(a => a.id).join(', ')}`);
     }
-    const result = await runAgentWithRetry(prompt, chatId, agentId, undefined, signal);
+    const result = await runAgentWithRetry(prompt, chatId, userId, agentId, undefined, signal);
     logHiveMind('orchestrator', 'delegation', `Delegated to ${agentId}`, { from: defaultAgentId, prompt: prompt.slice(0, 100) });
     return [{ agentId, result, delegated: true }];
   }
 
   // Default agent handling
-  const result = await runAgentWithRetry(text, chatId, defaultAgentId, undefined, signal);
+  const result = await runAgentWithRetry(text, chatId, userId, defaultAgentId, undefined, signal);
   return [{ agentId: defaultAgentId, result, delegated: false }];
 }
 

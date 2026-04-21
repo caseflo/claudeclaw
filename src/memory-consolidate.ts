@@ -39,13 +39,13 @@ Respond ONLY with valid JSON, no other text.
 
 let _processing = false; // Prevent overlapping consolidation runs
 
-export async function runConsolidation(agentId: string): Promise<void> {
+export async function runConsolidation(userId: string, agentId: string): Promise<void> {
   if (!GOOGLE_API_KEY()) return;
   if (_processing) return;
   _processing = true;
 
   try {
-    const memories = getUnconsolidatedMemories(agentId, 20);
+    const memories = getUnconsolidatedMemories(userId, agentId, 20);
     if (memories.length < 3) return;
 
     const result = await geminiGenerateJSON<ConsolidationResult>(CONSOLIDATION_PROMPT(memories));
@@ -75,10 +75,10 @@ export async function runConsolidation(agentId: string): Promise<void> {
   }
 }
 
-export function startConsolidationLoop(agentId: string): ReturnType<typeof setInterval> {
+export function startConsolidationLoop(userId: string, agentId: string): ReturnType<typeof setInterval> {
   // Run immediately, then every 30 minutes
-  runConsolidation(agentId).catch(() => {});
+  runConsolidation(userId, agentId).catch(() => {});
   return setInterval(() => {
-    runConsolidation(agentId).catch(() => {});
+    runConsolidation(userId, agentId).catch(() => {});
   }, 30 * 60 * 1000);
 }

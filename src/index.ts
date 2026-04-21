@@ -77,9 +77,9 @@ async function main(): Promise<void> {
     startDashboard();
   }
 
-  // Start memory consolidation loop for main agent
+  // Start memory consolidation loop for ramayne (placeholder — P1-24 will stagger all agents)
   if (FEATURES.voice) {
-    startConsolidationLoop('main');
+    startConsolidationLoop('ramayne', 'ramayne');
   }
 
   // Daily salience decay (run at startup, then every 24h)

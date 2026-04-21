@@ -9,7 +9,7 @@
 import {
   getAllEmbeddings, searchMemoriesFTS, getRecentHighImportanceMemories,
   getLatestConsolidations, searchConversationHistory, touchMemory, updateSalience,
-  Memory, getRecentMessages,
+  Memory, getRecentMessages, getMemoryById,
 } from './db.js';
 import { generateEmbedding, cosineSimilarity, decodeEmbedding } from './embeddings.js';
 import { MEMORY_MODE, MEMORY_NUDGE_INTERVAL_TURNS, MEMORY_NUDGE_INTERVAL_HOURS, GOOGLE_API_KEY } from './config.js';
@@ -28,6 +28,7 @@ function extractKeywords(text: string): string {
 }
 
 export async function buildMemoryContext(
+  userId: string,
   agentId: string,
   chatId: string,
   currentQuery: string,
@@ -35,7 +36,7 @@ export async function buildMemoryContext(
   if (MEMORY_MODE === 'none') return { context: '', surfacedIds: [], summaries: [] };
 
   if (MEMORY_MODE === 'simple') {
-    const recent = getRecentMessages(chatId, agentId, 20);
+    const recent = getRecentMessages(userId, chatId, agentId, 20);
     if (recent.length === 0) return { context: '', surfacedIds: [], summaries: [] };
     const context = '## Recent Conversation\n' + recent.map(m => `**${m.role}:** ${m.content}`).join('\n\n');
     return { context, surfacedIds: [], summaries: [] };
@@ -57,7 +58,7 @@ export async function buildMemoryContext(
   if (GOOGLE_API_KEY()) {
     try {
       const queryEmbedding = await generateEmbedding(currentQuery);
-      const allEmbeddings = getAllEmbeddings(agentId);
+      const allEmbeddings = getAllEmbeddings(userId, agentId);
 
       const scored = allEmbeddings
         .filter(row => row.embedding)
@@ -66,11 +67,10 @@ export async function buildMemoryContext(
         .sort((a, b) => b.sim - a.sim)
         .slice(0, 5);
 
-      // We need the full memory objects - let's get them from FTS as fallback
-      // Since we only have id+embedding, reconstruct from db (minor inefficiency acceptable)
+      // We need the full memory objects — fetch by id directly
       for (const { id } of scored) {
-        const results = searchConversationHistory(id, agentId, 365, 1);
-        results.forEach(addMemory);
+        const mem = getMemoryById(id);
+        if (mem) addMemory(mem);
       }
     } catch {
       // Embedding retrieval failed - continue with other layers
@@ -80,12 +80,12 @@ export async function buildMemoryContext(
   // Layer 2: FTS5 keyword search
   const keywords = extractKeywords(currentQuery);
   if (keywords) {
-    const ftsResults = searchMemoriesFTS(keywords, 5);
+    const ftsResults = searchMemoriesFTS(userId, keywords, 5);
     ftsResults.filter(m => m.agent_id === agentId).forEach(addMemory);
   }
 
   // Layer 3: Recent high-importance
-  const recentImportant = getRecentHighImportanceMemories(agentId, 5);
+  const recentImportant = getRecentHighImportanceMemories(userId, agentId, 5);
   recentImportant.forEach(addMemory);
 
   // Layer 4: Consolidation insights
@@ -94,7 +94,7 @@ export async function buildMemoryContext(
   // Layer 5: Conversation history recall
   const histKeywords = extractKeywords(currentQuery).split(' OR ').slice(0, 3).join(' ');
   if (histKeywords) {
-    const histResults = searchConversationHistory(histKeywords, agentId, 7, 10);
+    const histResults = searchConversationHistory(userId, histKeywords, agentId, 7, 10);
     histResults.forEach(addMemory);
   }
 

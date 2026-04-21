@@ -79,7 +79,7 @@ export function redactSecrets(text: string, chatId?: string, agentId?: string): 
   if (matches.length === 0) return text;
 
   // Log the exfiltration attempt
-  logAudit('exfiltration_blocked', `Blocked ${matches.length} secret(s): ${matches.map(m => m.type).join(', ')}`, chatId, agentId, { count: matches.length, types: matches.map(m => m.type) });
+  logAudit('exfiltration_blocked', `Blocked ${matches.length} secret(s): ${matches.map(m => m.type).join(', ')}`, 'ramayne', chatId, agentId, { count: matches.length, types: matches.map(m => m.type) });
 
   // Sort by position descending so replacements don't shift offsets
   matches.sort((a, b) => b.position - a.position);

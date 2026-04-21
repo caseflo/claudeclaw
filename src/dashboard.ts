@@ -45,8 +45,9 @@ export function startDashboard(): void {
 
   // API endpoints for dashboard data
   app.get('/api/memories', c => {
-    const agentId = c.req.query('agent') ?? 'main';
-    return c.json(getMemoriesByAgent(agentId, 100));
+    const userId = c.req.query('user') ?? 'ramayne';
+    const agentId = c.req.query('agent') ?? 'ramayne';
+    return c.json(getMemoriesByAgent(userId, agentId, 100));
   });
 
   app.get('/api/hive', c => {
@@ -62,8 +63,8 @@ export function startDashboard(): void {
   });
 
   app.get('/api/tokens', c => {
-    const agentId = c.req.query('agent');
-    return c.json(getTokenUsage(agentId));
+    const userId = c.req.query('user') ?? 'ramayne';
+    return c.json(getTokenUsage(userId));
   });
 
   app.get('/api/audit', c => {

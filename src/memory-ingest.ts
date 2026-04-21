@@ -44,8 +44,8 @@ Rules:
 - Respond ONLY with valid JSON, no other text
 `;
 
-async function hasDuplicate(agentId: string, embedding: number[], threshold = 0.85): Promise<boolean> {
-  const existing = getAllEmbeddings(agentId);
+async function hasDuplicate(userId: string, agentId: string, embedding: number[], threshold = 0.85): Promise<boolean> {
+  const existing = getAllEmbeddings(userId, agentId);
   for (const row of existing) {
     if (!row.embedding) continue;
     const existingVec = decodeEmbedding(row.embedding);
@@ -55,6 +55,7 @@ async function hasDuplicate(agentId: string, embedding: number[], threshold = 0.
 }
 
 export async function ingestConversation(
+  userId: string,
   chatId: string,
   agentId: string,
   messages: Array<{ role: string; content: string }>,
@@ -79,13 +80,14 @@ export async function ingestConversation(
 
       try {
         embedding = await generateEmbedding(mem.summary);
-        if (await hasDuplicate(agentId, embedding)) continue;
+        if (await hasDuplicate(userId, agentId, embedding)) continue;
         embeddingHex = encodeEmbedding(embedding);
       } catch (err) {
         console.warn('[memory-ingest] Embedding failed, storing without:', err);
       }
 
       const id = insertMemory({
+        user_id: userId,
         chat_id: chatId,
         agent_id: agentId,
         summary: mem.summary,
@@ -105,7 +107,7 @@ export async function ingestConversation(
       }
     }
   } catch (err) {
-    logAudit('memory_ingest_error', `Failed to ingest conversation: ${err}`, chatId, agentId);
+    logAudit('memory_ingest_error', `Failed to ingest conversation: ${err}`, userId, chatId, agentId);
   }
 }
 

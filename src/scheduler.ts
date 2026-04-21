@@ -51,7 +51,7 @@ async function runTask(task: ScheduledTask, sendToChat: (chatId: string, text: s
   setTaskStatus(task.id, 'running');
 
   try {
-    const result = await runAgentAutonomous(task.prompt, task.agent_id, task.chat_id);
+    const result = await runAgentAutonomous(task.prompt, task.user_id, task.agent_id, task.chat_id);
 
     const nextRun = computeNextRun(task.cron);
     updateTaskRun(task.id, nextRun);
