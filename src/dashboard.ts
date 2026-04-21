@@ -4,7 +4,7 @@
  */
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
-import { getMemoriesByAgent, getHiveMind, getAllTasks, getAllAgents, getTokenUsage, getAuditLog } from './db.js';
+import { getMemoriesByAgent, getHiveMind, getAllTasks, getAllAgents, getTokenUsage, getAuditLog, db } from './db.js';
 import { sseEvents } from './state.js';
 import { DASHBOARD_PORT, DASHBOARD_TOKEN } from './config.js';
 import { getDashboardHTML } from './dashboard-html.js';
@@ -12,13 +12,30 @@ import { getDashboardHTML } from './dashboard-html.js';
 export function startDashboard(): void {
   const app = new Hono();
 
-  // Token auth middleware
+  // Token auth middleware — applied to all routes except /api/health
   app.use('*', async (c, next) => {
     const token = c.req.query('token') ?? c.req.header('X-Dashboard-Token');
     if (token !== DASHBOARD_TOKEN()) {
       return c.text('Unauthorized. Add ?token=YOUR_TOKEN to the URL.', 401);
     }
     await next();
+  });
+
+  // Health check — token-exempt so external monitors can hit it
+  app.get('/api/health', c => {
+    let dbOk = false;
+    try {
+      db.exec('SELECT 1');
+      dbOk = true;
+    } catch {
+      dbOk = false;
+    }
+    return c.json({
+      ok: dbOk,
+      uptime: process.uptime(),
+      db_ok: dbOk,
+      memory_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    });
   });
 
   // Main dashboard UI
@@ -59,6 +76,8 @@ export function startDashboard(): void {
     c.header('Cache-Control', 'no-cache');
     c.header('Connection', 'keep-alive');
 
+    let hb: ReturnType<typeof setInterval> | null = null;
+
     const stream = new ReadableStream({
       start(controller) {
         const encoder = new TextEncoder();
@@ -73,14 +92,20 @@ export function startDashboard(): void {
         sseEvents.on('event', send);
 
         // Heartbeat every 30s
-        const hb = setInterval(() => {
+        hb = setInterval(() => {
           try {
             controller.enqueue(encoder.encode(': heartbeat\n\n'));
           } catch {
-            clearInterval(hb);
+            clearInterval(hb!);
             sseEvents.off('event', send);
           }
         }, 30000);
+
+        // Clean up listener and heartbeat when stream is cancelled
+        c.req.raw.signal.addEventListener('abort', () => {
+          if (hb !== null) clearInterval(hb);
+          sseEvents.off('event', send);
+        });
       },
     });
 
