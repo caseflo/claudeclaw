@@ -10,7 +10,9 @@ import { startConsolidationLoop } from './memory-consolidate.js';
 import { runSalienceDecay } from './db.js';
 import { upsertAgent, getAllAgents } from './db.js';
 import { loadAgentConfig, resolveAgentDir } from './agent-config.js';
-import { PID_FILE, STORE_DIR, FEATURES, AGENTS_DIR, DEFAULT_AGENT_MODEL } from './config.js';
+import { PID_FILE, STORE_DIR, FEATURES, AGENTS_DIR, DEFAULT_AGENT_MODEL, ANTHROPIC_API_KEY } from './config.js';
+import { stopScheduler } from './scheduler.js';
+import { db } from './db.js';
 import { mkdirSync } from 'fs';
 import pino from 'pino';
 
@@ -25,19 +27,6 @@ mkdirSync(AGENTS_DIR, { recursive: true });
 
 function writePidFile(): void {
   writeFileSync(PID_FILE, String(process.pid), 'utf8');
-}
-
-function killExistingInstance(): void {
-  if (!existsSync(PID_FILE)) return;
-  try {
-    const oldPid = parseInt(readFileSync(PID_FILE, 'utf8'));
-    if (oldPid && oldPid !== process.pid) {
-      process.kill(oldPid, 'SIGTERM');
-      log.info({ oldPid }, 'Killed existing instance');
-    }
-  } catch {
-    // Process already gone
-  }
 }
 
 // ─── Register default agents in DB ───────────────────────────────────────────
@@ -62,9 +51,23 @@ function initAgents(): void {
 // ─── Main startup ─────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  log.info('Starting AI Business OS...');
+  // Fail-fast: reject immediately if ANTHROPIC_API_KEY is missing
+  if (!ANTHROPIC_API_KEY()) {
+    throw new Error('ANTHROPIC_API_KEY is required but was not set');
+  }
 
-  killExistingInstance();
+  // Fail-fast PID check: if another instance is alive, exit immediately
+  if (existsSync(PID_FILE)) {
+    const pid = parseInt(readFileSync(PID_FILE, 'utf8'));
+    try {
+      process.kill(pid, 0);
+      log.error({ pid }, 'Another instance is running — refusing to start');
+      process.exit(1);
+    } catch {
+      // PID file stale — safe to continue
+    }
+  }
+
   writePidFile();
 
   initAgents();
@@ -93,10 +96,15 @@ async function main(): Promise<void> {
     });
   }
 
+  // Signal bot is ready for PM2 wait_ready
+  process.send?.('ready');
+
   // Graceful shutdown
-  const shutdown = (signal: string) => {
+  const shutdown = async (signal: string) => {
     log.info({ signal }, 'Shutting down gracefully');
-    bot.stop().catch(() => {});
+    try { await bot.stop(); } catch {}
+    try { stopScheduler(); } catch {}
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); db.close(); } catch {}
     process.exit(0);
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
@@ -108,6 +116,11 @@ async function main(): Promise<void> {
     onStart: info => log.info({ username: info.username }, 'Bot started'),
   });
 }
+
+// ─── Global exception handlers ─────────────────────────────────────────────────
+
+process.on('unhandledRejection', e => log.error({ err: e }, 'unhandledRejection'));
+process.on('uncaughtException', e => log.error({ err: e }, 'uncaughtException'));
 
 main().catch(err => {
   console.error('Fatal error:', err);
