@@ -89,6 +89,36 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Start staggered consolidation loops for all users and agents
+  // Stagger worker agents by 5 minutes each so they don't all hit Gemini at once
+  const WORKER_AGENTS = ['comms', 'content', 'ops', 'research'];
+  const STAGGER_MS = 5 * 60 * 1000; // 5 minutes
+
+  if (FEATURES.voice) {
+    // Master agents — stagger by 2 minutes
+    const masterAgents = userBots.map((ub, i) => ({
+      userId: ub.userId,
+      agentId: ub.userId,
+      delayMs: i * 2 * 60 * 1000,
+    }));
+    for (const { userId, agentId, delayMs } of masterAgents) {
+      setTimeout(() => {
+        startConsolidationLoop(userId, agentId);
+      }, delayMs);
+    }
+
+    // Shared worker agents — staggered 5 min apart, per user
+    for (const workerAgent of WORKER_AGENTS) {
+      for (let i = 0; i < userBots.length; i++) {
+        const ub = userBots[i];
+        const delayMs = (WORKER_AGENTS.indexOf(workerAgent) + 1) * STAGGER_MS + i * 2 * 60 * 1000;
+        setTimeout(() => {
+          startConsolidationLoop(ub.userId, workerAgent);
+        }, delayMs);
+      }
+    }
+  }
+
   // Build chatId → send function map for scheduler
   const chatIdToSender = new Map<string, (text: string) => Promise<void>>();
   for (const ub of userBots) {
