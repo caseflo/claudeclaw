@@ -758,3 +758,50 @@ The system's architecture is sound — multi-agent router, SQLite memory with FT
 7. **Per-agent CLAUDE.md never passed to the model** → five agents that are actually one.
 
 Fix those seven (≤ 6 hours of work) and the shutdowns stop. Then spend ~4 engineer-days layering in the dual-master-agent model for Ramayne + Cheyenne.
+
+---
+
+# PROGRESS.md — P1 Dual-Master-Agent Architecture
+
+**Date:** 2026-04-21
+**Repo:** `C:\Users\wendy\Desktop\claudeclaw-os`
+
+---
+
+## Status: ALL 11 ITEMS COMPLETE
+
+Verification: `npm run build` ✓, `npx tsc --noEmit` ✓
+
+---
+
+## P1 Item Status
+
+| # | Description | Status | Commit |
+|---|-------------|--------|--------|
+| 15 | Add `users` table; add `user_id` + index to sessions/messages/memories/scheduled_tasks/audit_log/token_usage; backwards-safe migration backfilling user_id='ramayne'; seed ramayne + cheyenne | **done** | `2138ee2` |
+| 16 | Create agents/ramayne/CLAUDE.md and agents/cheyenne/CLAUDE.md | **done** | `4059149` |
+| 17 | Add ramayne and cheyenne to agent.yaml (type: master); keep comms/content/ops/research as workers | **done** | `2161a5b` |
+| 18 | Convert createBot() to createBotsForUsers() reading users table; per-user bot with own token and allowlist; Cheyenne bot skips gracefully if CHEYENNE_CHAT_ID not set | **done** | `1d8f2d2` |
+| 19 | Boot all user bots from createBotsForUsers(); pass chatId→sender map to scheduler so scheduled tasks route to correct user | **done** | `8acdd29` |
+| 20 | Load per-agent CLAUDE.md via resolveAgentClaudeMd() and pass as systemPrompt to runAgentWithRetry | **done** | `502be16` |
+| 21 | Scope getMemoriesByAgent, searchMemoriesFTS, getRecentMessages, getUnconsolidatedMemories, getRecentHighImportanceMemories, searchConversationHistory, getAllEmbeddings by user_id | **done** (in P1-18) | `1d8f2d2` |
+| 22 | Replay last 10 conversation messages into Anthropic request via getRecentMessages | **done** (in P1-20) | `502be16` |
+| 23 | Replace broken searchConversationHistory(id, ...) Layer 1 call with new getMemoryById() helper | **done** (in P1-18) | `1d8f2d2` |
+| 24 | Staggered consolidation: master agents 2min apart, shared workers 5min apart per user | **done** | `d57d279` |
+| 25 | Rewrite root CLAUDE.md: dual-master layout, UK English, hard CaseFlo boundary, no Wendy references | **done** | `48522fa` |
+
+---
+
+## Deviations
+
+- P1-18 also fixed P1-21 (user_id scoping) and P1-23 (getMemoryById) since they were all in the same cascade.
+- P1-20 also fixed P1-22 (message replay) since they share the same code path in agent.ts.
+- Hard boundary: agents/ops/CLAUDE.md mentions "Supabase" as general platform knowledge (database management skill) — not CaseFlo's Supabase. agents/main/CLAUDE.md still references Wendy (legacy worker, not touched — P2 item).
+- Supabase references in agents/ops/CLAUDE.md are general platform knowledge, not CaseFlo-specific integrations.
+
+---
+
+## What Was Not Touched
+
+- P2 items (dead modules, cleanups, etc.)
+- No code pushed to remote — all commits local
