@@ -3,6 +3,9 @@
  * Handles all message types, commands, typing indicators, voice, and agent routing.
  */
 import { Bot, Context, InputFile } from 'grammy';
+import pino from 'pino';
+
+const log = pino({ transport: { target: 'pino-pretty', options: { colorize: true } } });
 import { enqueue, getQueueDepth } from './message-queue.js';
 import { clearSession } from './db.js';
 import { buildMemoryContext } from './memory.js';
@@ -171,8 +174,10 @@ export function createBot(): Bot {
     if (isLocked(chatId)) { await ctx.reply('Bot is locked.'); return; }
 
     enqueue(chatId, async () => {
-      const statusMsg = await ctx.reply('Transcribing voice note...');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let statusMsg: any;
       try {
+        statusMsg = await ctx.reply('Transcribing voice note...');
         const file = await ctx.getFile();
         const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN()}/${file.file_path}`;
 
@@ -185,10 +190,14 @@ export function createBot(): Bot {
         const transcript = await transcribeAudio(buffer, 'audio.ogg');
         const prefixed = `[Voice transcribed]: ${transcript}`;
 
-        await ctx.api.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
+        if (statusMsg) {
+          await ctx.api.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
+        }
         await handleTextMessage(ctx, chatId, prefixed, true);
       } catch (err) {
-        await ctx.api.editMessageText(chatId, statusMsg.message_id, `Transcription failed: ${err}`).catch(() => {});
+        if (statusMsg) {
+          await ctx.api.editMessageText(chatId, statusMsg.message_id, `Transcription failed: ${err}`).catch(() => {});
+        }
       }
     });
   });
@@ -210,6 +219,11 @@ export function createBot(): Bot {
     const filename = ctx.message.document.file_name ?? 'document';
     const caption = ctx.message.caption ?? 'Process this document';
     enqueue(chatId, () => handleTextMessage(ctx, chatId, `[Document: ${filename}]: ${caption}`));
+  });
+
+  // Error handler for Grammy — logs 409 and other Telegram errors
+  bot.catch(err => {
+    log.error({ err }, 'bot error — will be retried by grammy');
   });
 
   return bot;
