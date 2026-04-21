@@ -8,25 +8,31 @@ import { SCHEDULER_POLL_MS } from './config.js';
 import CronParser from 'cron-parser';
 
 let _running = false;
-let _pollInterval: ReturnType<typeof setInterval> | null = null;
+let _pollTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function startScheduler(sendToChat: (chatId: string, text: string) => Promise<void>): void {
   if (_running) return;
   _running = true;
 
-  _pollInterval = setInterval(() => {
-    checkDueTasks(sendToChat).catch(err => {
-      console.error('[scheduler] Poll error:', err);
-    });
-  }, SCHEDULER_POLL_MS);
+  const scheduleNext = () => {
+    _pollTimer = setTimeout(async () => {
+      try {
+        await checkDueTasks(sendToChat);
+      } catch (err) {
+        console.error('[scheduler] Poll error:', err);
+      }
+      if (_running) scheduleNext();
+    }, SCHEDULER_POLL_MS);
+  };
 
+  scheduleNext();
   console.log(`[scheduler] Started. Polling every ${SCHEDULER_POLL_MS / 1000}s`);
 }
 
 export function stopScheduler(): void {
-  if (_pollInterval) {
-    clearInterval(_pollInterval);
-    _pollInterval = null;
+  if (_pollTimer) {
+    clearTimeout(_pollTimer);
+    _pollTimer = null;
   }
   _running = false;
 }
